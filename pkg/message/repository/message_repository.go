@@ -11,6 +11,7 @@ type MessageRepository interface {
 	GetMessageByID(messageID string) (*message_model.Message, error)
 	DeleteAllMessages() (int64, error)
 	GetLatestMessageID(source string) (string, string, error)
+	InsertHistory(messages []message_model.HistoryMessage) error
 }
 
 type messageRepository struct {
@@ -62,6 +63,14 @@ func (m *messageRepository) GetLatestMessageID(source string) (string, string, e
 	}
 
 	return message.MessageID, message.Timestamp, nil
+}
+
+// InsertHistory grava o histórico do pareamento; mensagem já gravada (o WhatsApp repete lotes) fica como está.
+func (m *messageRepository) InsertHistory(messages []message_model.HistoryMessage) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	return m.db.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(messages, 500).Error
 }
 
 func NewMessageRepository(db *gorm.DB) MessageRepository {

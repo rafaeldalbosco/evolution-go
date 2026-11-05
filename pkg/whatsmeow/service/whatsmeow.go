@@ -144,6 +144,58 @@ func (mycli *MyClient) persistMessageAsync(message message_model.Message) {
 	}()
 }
 
+// persistHistory grava as conversas de um lote do histórico do pareamento (history_messages). Conversa por LID vai
+// pelo número quando o aparelho já conhece o par; status e newsletter ficam de fora.
+func (mycli *MyClient) persistHistory(evt *events.HistorySync) {
+	if mycli == nil || mycli.messageRepository == nil || mycli.Instance == nil || mycli.WAClient == nil {
+		return
+	}
+	log := mycli.loggerWrapper.GetLogger(mycli.userID)
+	var rows []message_model.HistoryMessage
+	for _, conv := range evt.Data.GetConversations() {
+		chatJID, err := types.ParseJID(conv.GetID())
+		if err != nil || chatJID.Server == types.BroadcastServer || chatJID.Server == types.NewsletterServer {
+			continue
+		}
+		chat := chatJID
+		if chat.Server == types.HiddenUserServer {
+			if pn, err := types.ParseJID(conv.GetPnJID()); err == nil && !pn.IsEmpty() {
+				chat = pn
+			} else if mycli.WAClient.Store.LIDs != nil {
+				if pn, err := mycli.WAClient.Store.LIDs.GetPNForLID(context.TODO(), chatJID); err == nil && !pn.IsEmpty() {
+					chat = pn
+				}
+			}
+		}
+		for _, hm := range conv.GetMessages() {
+			msg, err := mycli.WAClient.ParseWebMessage(chatJID, hm.GetMessage())
+			if err != nil || msg == nil || msg.Message == nil || msg.Info.ID == "" {
+				continue
+			}
+			conteudo, err := json.Marshal(msg.Message)
+			if err != nil {
+				continue
+			}
+			rows = append(rows, message_model.HistoryMessage{
+				MessageID:  msg.Info.ID,
+				InstanceID: mycli.Instance.Id,
+				ChatJID:    chat.ToNonAD().String(),
+				SenderJID:  msg.Info.Sender.ToNonAD().String(),
+				PushName:   msg.Info.PushName,
+				FromMe:     msg.Info.IsFromMe,
+				IsGroup:    msg.Info.IsGroup,
+				Timestamp:  msg.Info.Timestamp,
+				Message:    conteudo,
+			})
+		}
+	}
+	if err := mycli.messageRepository.InsertHistory(rows); err != nil {
+		log.LogError("[%s] Failed to persist history sync (%d messages): %v", mycli.userID, len(rows), err)
+		return
+	}
+	log.LogInfo("[%s] History sync persisted: %d messages", mycli.userID, len(rows))
+}
+
 type ClientData struct {
 	Instance      *instance_model.Instance
 	Subscriptions []string
@@ -1830,6 +1882,9 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		postMap["event"] = "HistorySync"
 
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] History sync event received %+v", mycli.userID, evt.Data.SyncType)
+		if mycli.config.DatabaseSaveHistory {
+			go mycli.persistHistory(evt)
+		}
 	case *events.AppState:
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] App state event received %+v", mycli.userID, evt)
 	case *events.LoggedOut:

@@ -25,6 +25,7 @@ type Config struct {
 	PostgresPassword     string
 	PostgresDB           string
 	DatabaseSaveMessages bool
+	DatabaseSaveHistory  bool
 	GlobalApiKey         string
 	WaDebug              string
 	LogType              string
@@ -225,6 +226,8 @@ func Load() *Config {
 
 	databaseSaveMessages := os.Getenv(config_env.DATABASE_SAVE_MESSAGES)
 	panicIfEmpty(config_env.DATABASE_SAVE_MESSAGES, databaseSaveMessages)
+	// Opcional: guarda o histórico do pareamento (tabela history_messages) para importar depois.
+	databaseSaveHistory := os.Getenv(config_env.DATABASE_SAVE_HISTORY)
 
 	globalApiKey := os.Getenv(config_env.GLOBAL_API_KEY)
 	panicIfEmpty(config_env.GLOBAL_API_KEY, globalApiKey)
@@ -346,6 +349,7 @@ func Load() *Config {
 		PostgresAuthDB:       postgresAuthDB,
 		postgresUsersDB:      postgresUsersDB,
 		DatabaseSaveMessages: databaseSaveMessages == "true",
+		DatabaseSaveHistory:  databaseSaveHistory == "true",
 		GlobalApiKey:         globalApiKey,
 		WaDebug:              waDebug,
 		LogType:              logType,

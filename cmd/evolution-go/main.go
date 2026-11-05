@@ -263,7 +263,7 @@ func setupRouter(db *gorm.DB, authDB *sql.DB, sqliteDB *sql.DB, config *config.C
 }
 
 func migrate(db *gorm.DB) {
-	err := db.AutoMigrate(&instance_model.Instance{}, &message_model.Message{}, &label_model.Label{})
+	err := db.AutoMigrate(&instance_model.Instance{}, &message_model.Message{}, &message_model.HistoryMessage{}, &label_model.Label{})
 
 	if err != nil {
 		log.Fatal(err)
