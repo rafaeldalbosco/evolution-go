@@ -18,6 +18,7 @@ import (
 	"github.com/gomessguii/logger"
 	"github.com/joho/godotenv"
 	"go.mau.fi/whatsmeow"
+	waStore "go.mau.fi/whatsmeow/store"
 	"gorm.io/gorm"
 	_ "modernc.org/sqlite"
 
@@ -331,6 +332,17 @@ func initPostgresAuthDB(config *config.Config) (*sql.DB, error) {
 // @description Evolution GO - whatsmeow
 func main() {
 	flag.Parse()
+	// Átrio: versão do cliente WhatsApp. A do whatsmeow embutido fica velha e o WhatsApp responde
+	// "Client outdated (405)"; WA_VERSION troca sem recompilar (versão atual em whatsmeow store/clientpayload.go).
+	waVersao := os.Getenv("WA_VERSION")
+	if waVersao == "" {
+		waVersao = "2.3000.1053222777"
+	}
+	if v, err := waStore.ParseVersion(waVersao); err != nil {
+		log.Fatalf("WA_VERSION inválida %q: %v", waVersao, err)
+	} else {
+		waStore.SetWAVersion(v)
+	}
 	if *devMode {
 		err := godotenv.Load(".env")
 		if err != nil {
