@@ -330,25 +330,42 @@ func initPostgresAuthDB(config *config.Config) (*sql.DB, error) {
 // @title Evolution GO
 // @version 1.0
 // @description Evolution GO - whatsmeow
+// Átrio: versão do cliente WhatsApp. A embutida no whatsmeow envelhece e o WhatsApp responde "Client outdated (405)".
+// Ordem: WA_VERSION (fixa) > a atual de web.whatsapp.com (como o Baileys faz) > reserva abaixo.
+// shortcut: busca só na subida; pod muito tempo no ar pode envelhecer, um restart pega a nova.
+func ajustarVersaoWhatsApp() {
+	const reserva = "2.3000.1053222777"
+	if fixa := os.Getenv("WA_VERSION"); fixa != "" {
+		v, err := waStore.ParseVersion(fixa)
+		if err != nil {
+			log.Fatalf("WA_VERSION inválida %q: %v", fixa, err)
+		}
+		waStore.SetWAVersion(v)
+		log.Printf("Versão do WhatsApp (WA_VERSION): %s", v)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if v, err := whatsmeow.GetLatestVersion(ctx, nil); err == nil {
+		waStore.SetWAVersion(*v)
+		log.Printf("Versão do WhatsApp (web.whatsapp.com): %s", v)
+		return
+	} else {
+		log.Printf("Não deu para buscar a versão do WhatsApp (%v): usando a reserva %s", err, reserva)
+	}
+	v, _ := waStore.ParseVersion(reserva)
+	waStore.SetWAVersion(v)
+}
+
 func main() {
 	flag.Parse()
-	// Átrio: versão do cliente WhatsApp. A do whatsmeow embutido fica velha e o WhatsApp responde
-	// "Client outdated (405)"; WA_VERSION troca sem recompilar (versão atual em whatsmeow store/clientpayload.go).
-	waVersao := os.Getenv("WA_VERSION")
-	if waVersao == "" {
-		waVersao = "2.3000.1053222777"
-	}
-	if v, err := waStore.ParseVersion(waVersao); err != nil {
-		log.Fatalf("WA_VERSION inválida %q: %v", waVersao, err)
-	} else {
-		waStore.SetWAVersion(v)
-	}
 	if *devMode {
 		err := godotenv.Load(".env")
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
+	ajustarVersaoWhatsApp()
 
 	cfg := config.Load()
 
