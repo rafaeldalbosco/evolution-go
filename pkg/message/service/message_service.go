@@ -478,6 +478,10 @@ func (m *messageService) DeleteMessageEveryone(data *MessageStruct, instance *in
 		return "", "", errors.New("invalid phone number")
 	}
 
+	// BuildRevoke puts recipient into MessageKey.RemoteJID. ParseJID/CreateJID
+	// may prefix "+", which prevents the revoke from matching the original chat.
+	recipient = utils.CanonicalJID(recipient)
+
 	m.loggerWrapper.GetLogger(instance.Id).LogInfo("Revoking message %s from %s", data.MessageID, recipient)
 
 	resp, err := client.SendMessage(
@@ -505,6 +509,9 @@ func (m *messageService) EditMessage(data *EditMessageStruct, instance *instance
 		m.loggerWrapper.GetLogger(instance.Id).LogError("[%s] Error validating message fields", instance.Id)
 		return "", "", errors.New("invalid phone number")
 	}
+
+	// Same as DeleteMessageEveryone: MessageKey.RemoteJID must be digits-only.
+	recipient = utils.CanonicalJID(recipient)
 
 	resp, err := client.SendMessage(
 		context.Background(),
