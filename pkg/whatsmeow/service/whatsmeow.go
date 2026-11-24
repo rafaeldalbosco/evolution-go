@@ -1234,46 +1234,9 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			return
 		}
 
-		// Trata o caso especial onde Sender é @lid e SenderAlt é @s.whatsapp.net
-		// Neste caso, devemos inverter: Sender e Chat devem ser @s.whatsapp.net, SenderAlt deve ser @lid
-		senderStr := evt.Info.Sender.String()
-		senderAltStr := evt.Info.SenderAlt.String()
-		chatStr := evt.Info.Chat.String()
-
-		if strings.Contains(senderStr, "@lid") && strings.Contains(senderAltStr, "@s.whatsapp.net") {
-			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Detected LID/WhatsApp JID swap case - Sender: %s, SenderAlt: %s", mycli.userID, senderStr, senderAltStr)
-
-			// Limpa os IDs antes de fazer a troca
-			cleanSenderAlt := cleanSenderID(senderAltStr)
-			cleanSender := cleanSenderID(senderStr)
-
-			// Inverte: Sender e Chat recebem o @s.whatsapp.net, SenderAlt recebe o @lid
-			if cleanedWhatsAppJID, err := types.ParseJID(cleanSenderAlt); err == nil {
-				evt.Info.Sender = cleanedWhatsAppJID
-				// Se Chat também é @lid, atualiza para @s.whatsapp.net
-				if strings.Contains(chatStr, "@lid") {
-					evt.Info.Chat = cleanedWhatsAppJID
-				}
-			}
-
-			if cleanedLID, err := types.ParseJID(cleanSender); err == nil {
-				evt.Info.SenderAlt = cleanedLID
-			}
-
-			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] JID swap completed - New Sender: %s, New SenderAlt: %s, New Chat: %s",
-				mycli.userID, evt.Info.Sender.String(), evt.Info.SenderAlt.String(), evt.Info.Chat.String())
-		} else {
-			// Comportamento normal: apenas limpa os IDs
-			cleanSender := cleanSenderID(senderStr)
-			if cleanedJID, err := types.ParseJID(cleanSender); err == nil {
-				evt.Info.Sender = cleanedJID
-			}
-
-			cleanSenderAlt := cleanSenderID(senderAltStr)
-			if cleanedLID, err := types.ParseJID(cleanSenderAlt); err == nil {
-				evt.Info.SenderAlt = cleanedLID
-			}
-		}
+		// WhatsApp LID (@lid): troca para o número (@s.whatsapp.net) e completa PushName da agenda.
+		// Sem isso a ponte grava o contato no Chatwoot com o LID no lugar do telefone/nome.
+		mycli.resolvePhoneAddressing(evt)
 
 		// Auto-marca mensagens como lidas se configurado
 		if mycli.Instance.ReadMessages && !evt.Info.IsFromMe {
@@ -2947,4 +2910,97 @@ func cleanSenderID(senderID string) string {
 		}
 	}
 	return senderID
+}
+
+func parseCleanJID(raw string) (types.JID, bool) {
+	jid, err := types.ParseJID(cleanSenderID(raw))
+	return jid, err == nil && !jid.IsEmpty()
+}
+
+// resolvePhoneAddressing troca Chat/Sender @lid pelo número e preenche PushName da agenda do aparelho.
+func (mycli *MyClient) resolvePhoneAddressing(evt *events.Message) {
+	if evt == nil {
+		return
+	}
+	log := mycli.loggerWrapper.GetLogger(mycli.userID)
+
+	if jid, ok := parseCleanJID(evt.Info.Sender.String()); ok {
+		evt.Info.Sender = jid
+	}
+	if jid, ok := parseCleanJID(evt.Info.SenderAlt.String()); ok {
+		evt.Info.SenderAlt = jid
+	}
+	if jid, ok := parseCleanJID(evt.Info.RecipientAlt.String()); ok {
+		evt.Info.RecipientAlt = jid
+	}
+	if jid, ok := parseCleanJID(evt.Info.Chat.String()); ok {
+		evt.Info.Chat = jid
+	}
+
+	sender := evt.Info.Sender
+	alt := evt.Info.SenderAlt
+	chat := evt.Info.Chat
+
+	// Sender @lid + SenderAlt número → inverte (número no Sender/Chat, LID no Alt)
+	if sender.Server == types.HiddenUserServer && alt.Server == types.DefaultUserServer {
+		log.LogInfo("[%s] LID→PN via SenderAlt: %s → %s", mycli.userID, sender, alt)
+		evt.Info.SenderAlt = sender
+		evt.Info.Sender = alt
+		if chat.Server == types.HiddenUserServer {
+			evt.Info.Chat = alt
+		}
+		sender, alt, chat = evt.Info.Sender, evt.Info.SenderAlt, evt.Info.Chat
+	}
+
+	// Chat ainda @lid: Sender PN, RecipientAlt (mensagem nossa) ou mapa LID do aparelho
+	if chat.Server == types.HiddenUserServer {
+		var pn types.JID
+		switch {
+		case sender.Server == types.DefaultUserServer:
+			pn = sender
+		case evt.Info.IsFromMe && evt.Info.RecipientAlt.Server == types.DefaultUserServer:
+			pn = evt.Info.RecipientAlt
+		case alt.Server == types.DefaultUserServer:
+			pn = alt
+		case mycli.WAClient != nil && mycli.WAClient.Store != nil && mycli.WAClient.Store.LIDs != nil:
+			if mapped, err := mycli.WAClient.Store.LIDs.GetPNForLID(context.TODO(), chat); err == nil && !mapped.IsEmpty() {
+				pn = mapped
+				log.LogInfo("[%s] LID→PN via store: %s → %s", mycli.userID, chat, pn)
+			}
+		}
+		if !pn.IsEmpty() {
+			lid := chat
+			evt.Info.Chat = pn.ToNonAD()
+			if sender.Server == types.HiddenUserServer {
+				evt.Info.Sender = pn.ToNonAD()
+				if evt.Info.SenderAlt.IsEmpty() || evt.Info.SenderAlt.Server == types.DefaultUserServer {
+					evt.Info.SenderAlt = lid
+				}
+			}
+		}
+	}
+
+	// PushName vazio: usa nome da agenda (é comum o evento LID chegar sem PushName)
+	if strings.TrimSpace(evt.Info.PushName) == "" && mycli.WAClient != nil && mycli.WAClient.Store != nil && mycli.WAClient.Store.Contacts != nil {
+		for _, jid := range []types.JID{evt.Info.Sender, evt.Info.Chat, evt.Info.SenderAlt} {
+			if jid.IsEmpty() {
+				continue
+			}
+			c, err := mycli.WAClient.Store.Contacts.GetContact(context.TODO(), jid)
+			if err != nil {
+				continue
+			}
+			name := c.PushName
+			if name == "" {
+				name = c.FullName
+			}
+			if name == "" {
+				name = c.BusinessName
+			}
+			if name != "" {
+				evt.Info.PushName = name
+				break
+			}
+		}
+	}
 }
