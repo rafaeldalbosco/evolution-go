@@ -334,7 +334,7 @@ func initPostgresAuthDB(config *config.Config) (*sql.DB, error) {
 // Ordem: WA_VERSION (fixa) > a atual de web.whatsapp.com (como o Baileys faz) > reserva abaixo.
 // shortcut: busca só na subida; pod muito tempo no ar pode envelhecer, um restart pega a nova.
 func ajustarVersaoWhatsApp() {
-	const reserva = "2.3000.1053222777"
+	const reserva = "2.3000.1055991158"
 	if fixa := os.Getenv("WA_VERSION"); fixa != "" {
 		v, err := waStore.ParseVersion(fixa)
 		if err != nil {
