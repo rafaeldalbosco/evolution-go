@@ -1449,7 +1449,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 					}
 				} else if document != nil {
 					mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Downloading document - ID: %s, FileName: %s, Size: %d bytes", mycli.userID, evt.Info.ID, document.GetFileName(), document.GetFileLength())
-					data, err = mycli.WAClient.Download(downloadCtx, document)
+					data, err = utils.DownloadDocument(downloadCtx, mycli.WAClient, document)
 					extension = getExtensionFromMimeType(document.GetMimetype())
 					mimeType = document.GetMimetype()
 					if document.FileLength != nil {
@@ -1502,7 +1502,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 					mimeType = "audio/ogg"
 					mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Processing associated child audio message", mycli.userID)
 				} else if associatedDocument != nil {
-					data, err = mycli.WAClient.Download(context.Background(), associatedDocument)
+					data, err = utils.DownloadDocument(context.Background(), mycli.WAClient, associatedDocument)
 					extension = getExtensionFromMimeType(associatedDocument.GetMimetype())
 					mimeType = associatedDocument.GetMimetype()
 					mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Processing associated child document message", mycli.userID)
