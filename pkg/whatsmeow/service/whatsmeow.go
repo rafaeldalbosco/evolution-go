@@ -1243,6 +1243,11 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Failed to decrypt message edit %s: %v", mycli.userID, evt.Info.ID, err)
 				return
 			}
+			// O conteúdo decifrado pode vir como a própria protocolMessage de edição.
+			if inner := edited.GetProtocolMessage().GetEditedMessage(); inner != nil {
+				edited = inner
+			}
+			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Decrypted message edit %s → %s", mycli.userID, evt.Info.ID, utils.GetMessageType(edited))
 			evt.Message = &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
 				Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
 				Key:           enc.GetTargetMessageKey(),
