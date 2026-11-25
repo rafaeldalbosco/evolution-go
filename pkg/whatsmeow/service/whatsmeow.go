@@ -144,6 +144,29 @@ func (mycli *MyClient) persistMessageAsync(message message_model.Message) {
 	}()
 }
 
+type cachedGroup struct {
+	info *types.GroupInfo
+	at   time.Time
+}
+
+// groupInfo busca o grupo no WhatsApp no máximo a cada 10 min por chat; se a consulta falhar (limite de taxa,
+// timeout), fica o último conhecido, para a mensagem não chegar sem o nome do grupo.
+func (mycli *MyClient) groupInfo(chat types.JID) *types.GroupInfo {
+	key := "group:" + mycli.userID + ":" + chat.String()
+	cached, _ := mycli.userInfoCache.Get(key)
+	c, _ := cached.(cachedGroup)
+	if c.info != nil && time.Since(c.at) < 10*time.Minute {
+		return c.info
+	}
+	info, err := mycli.WAClient.GetGroupInfo(context.Background(), chat)
+	if err != nil {
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] group info of %s: %v", mycli.userID, chat, err)
+		return c.info
+	}
+	mycli.userInfoCache.Set(key, cachedGroup{info: info, at: time.Now()}, cache.NoExpiration)
+	return info
+}
+
 // persistHistory grava as conversas de um lote do histórico do pareamento (history_messages). Conversa por LID vai
 // pelo número quando o aparelho já conhece o par; status e newsletter ficam de fora.
 func (mycli *MyClient) persistHistory(evt *events.HistorySync) {
@@ -177,6 +200,7 @@ func (mycli *MyClient) persistHistory(evt *events.HistorySync) {
 				continue
 			}
 			rows = append(rows, message_model.HistoryMessage{
+				ChatName:   conv.GetName(),
 				MessageID:  msg.Info.ID,
 				InstanceID: mycli.Instance.Id,
 				ChatJID:    chat.ToNonAD().String(),
@@ -1632,8 +1656,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 
 		isGroup := strings.HasSuffix(evt.Info.Chat.String(), "@g.us")
 		if isGroup {
-			groupData, err := mycli.WAClient.GetGroupInfo(context.Background(), evt.Info.Chat)
-			if err == nil {
+			if groupData := mycli.groupInfo(evt.Info.Chat); groupData != nil {
 				dataMap["groupData"] = groupData
 			}
 		}

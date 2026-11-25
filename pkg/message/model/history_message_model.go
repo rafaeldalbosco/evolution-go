@@ -12,6 +12,7 @@ type HistoryMessage struct {
 	MessageID  string          `json:"message_id" gorm:"primaryKey"`
 	InstanceID string          `json:"instance_id" gorm:"type:uuid;primaryKey;index:idx_history_instancia_data,priority:1"`
 	ChatJID    string          `json:"chat_jid"`
+	ChatName   string          `json:"chat_name"` // nome do grupo no histórico (o número pode já ter saído dele)
 	SenderJID  string          `json:"sender_jid"`
 	PushName   string          `json:"push_name"`
 	FromMe     bool            `json:"from_me"`
