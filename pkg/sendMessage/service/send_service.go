@@ -2839,7 +2839,7 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 		} else if audio != nil {
 			data, err = s.clientPointer[instance.Id].Download(context.Background(), audio)
 		} else if document != nil {
-			data, err = s.clientPointer[instance.Id].Download(context.Background(), document)
+			data, err = utils.DownloadDocument(context.Background(), s.clientPointer[instance.Id], document)
 		} else if video != nil {
 			data, err = s.clientPointer[instance.Id].Download(context.Background(), video)
 		} else if sticker != nil {

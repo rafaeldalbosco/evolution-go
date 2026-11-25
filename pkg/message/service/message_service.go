@@ -414,7 +414,7 @@ func (m *messageService) DownloadMedia(data *DownloadMediaStruct, instance *inst
 	}
 
 	if document != nil {
-		mediaData, err = client.Download(context.Background(), document)
+		mediaData, err = utils.DownloadDocument(context.Background(), client, document)
 		if err != nil {
 			m.loggerWrapper.GetLogger(instance.Id).LogError("[%s] Failed to download document", instance.Id)
 			msg := fmt.Sprintf("Failed to download document %v", err)
