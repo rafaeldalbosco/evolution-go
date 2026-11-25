@@ -1234,6 +1234,23 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			return
 		}
 
+		// Edição nova do WhatsApp vem cifrada com o segredo da mensagem original; vira a
+		// protocolMessage MESSAGE_EDIT de sempre. Antes da troca LID→PN: o segredo é guardado pelo chat original.
+		if enc := evt.Message.GetSecretEncryptedMessage(); enc != nil &&
+			enc.GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT {
+			edited, err := mycli.WAClient.DecryptSecretEncryptedMessage(context.Background(), evt)
+			if err != nil {
+				mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Failed to decrypt message edit %s: %v", mycli.userID, evt.Info.ID, err)
+				return
+			}
+			evt.Message = &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+				Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+				Key:           enc.GetTargetMessageKey(),
+				EditedMessage: edited,
+				TimestampMS:   proto.Int64(evt.Info.Timestamp.UnixMilli()),
+			}}
+		}
+
 		// WhatsApp LID (@lid): troca para o número (@s.whatsapp.net) e completa PushName da agenda.
 		// Sem isso a ponte grava o contato no Chatwoot com o LID no lugar do telefone/nome.
 		mycli.resolvePhoneAddressing(evt)
