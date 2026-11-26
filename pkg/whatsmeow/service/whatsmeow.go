@@ -144,6 +144,29 @@ func (mycli *MyClient) persistMessageAsync(message message_model.Message) {
 	}()
 }
 
+type cachedGroup struct {
+	info *types.GroupInfo
+	at   time.Time
+}
+
+// groupInfo busca o grupo no WhatsApp no máximo a cada 10 min por chat; se a consulta falhar (limite de taxa,
+// timeout), fica o último conhecido, para a mensagem não chegar sem o nome do grupo.
+func (mycli *MyClient) groupInfo(chat types.JID) *types.GroupInfo {
+	key := "group:" + mycli.userID + ":" + chat.String()
+	cached, _ := mycli.userInfoCache.Get(key)
+	c, _ := cached.(cachedGroup)
+	if c.info != nil && time.Since(c.at) < 10*time.Minute {
+		return c.info
+	}
+	info, err := mycli.WAClient.GetGroupInfo(context.Background(), chat)
+	if err != nil {
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] group info of %s: %v", mycli.userID, chat, err)
+		return c.info
+	}
+	mycli.userInfoCache.Set(key, cachedGroup{info: info, at: time.Now()}, cache.NoExpiration)
+	return info
+}
+
 // persistHistory grava as conversas de um lote do histórico do pareamento (history_messages). Conversa por LID vai
 // pelo número quando o aparelho já conhece o par; status e newsletter ficam de fora.
 func (mycli *MyClient) persistHistory(evt *events.HistorySync) {
@@ -177,6 +200,7 @@ func (mycli *MyClient) persistHistory(evt *events.HistorySync) {
 				continue
 			}
 			rows = append(rows, message_model.HistoryMessage{
+				ChatName:   conv.GetName(),
 				MessageID:  msg.Info.ID,
 				InstanceID: mycli.Instance.Id,
 				ChatJID:    chat.ToNonAD().String(),
@@ -1234,6 +1258,28 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			return
 		}
 
+		// Edição nova do WhatsApp vem cifrada com o segredo da mensagem original; vira a
+		// protocolMessage MESSAGE_EDIT de sempre. Antes da troca LID→PN: o segredo é guardado pelo chat original.
+		if enc := evt.Message.GetSecretEncryptedMessage(); enc != nil &&
+			enc.GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT {
+			edited, err := mycli.WAClient.DecryptSecretEncryptedMessage(context.Background(), evt)
+			if err != nil {
+				mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Failed to decrypt message edit %s: %v", mycli.userID, evt.Info.ID, err)
+				return
+			}
+			// O conteúdo decifrado pode vir como a própria protocolMessage de edição.
+			if inner := edited.GetProtocolMessage().GetEditedMessage(); inner != nil {
+				edited = inner
+			}
+			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Decrypted message edit %s → %s", mycli.userID, evt.Info.ID, utils.GetMessageType(edited))
+			evt.Message = &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+				Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+				Key:           enc.GetTargetMessageKey(),
+				EditedMessage: edited,
+				TimestampMS:   proto.Int64(evt.Info.Timestamp.UnixMilli()),
+			}}
+		}
+
 		// WhatsApp LID (@lid): troca para o número (@s.whatsapp.net) e completa PushName da agenda.
 		// Sem isso a ponte grava o contato no Chatwoot com o LID no lugar do telefone/nome.
 		mycli.resolvePhoneAddressing(evt)
@@ -1610,8 +1656,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 
 		isGroup := strings.HasSuffix(evt.Info.Chat.String(), "@g.us")
 		if isGroup {
-			groupData, err := mycli.WAClient.GetGroupInfo(context.Background(), evt.Info.Chat)
-			if err == nil {
+			if groupData := mycli.groupInfo(evt.Info.Chat); groupData != nil {
 				dataMap["groupData"] = groupData
 			}
 		}
